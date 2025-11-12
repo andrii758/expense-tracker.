@@ -17,6 +17,7 @@ CATEGORIES = [
     "Transport",
     "Healthcare",
     "Utilities",
+    "test",
 ]
 
 
@@ -227,6 +228,25 @@ def id_exists(data, id_to_delete):
             return True
     return False
 
+def get_limit(limit_file, month):
+    try:
+        with open(limit_file, "r") as lmtfile:
+            lmtfile.seek(0)
+            content = lmtfile.read().strip()
+
+            if not content:
+                return []
+
+            data = json.load(lmtfile)
+
+            for limit in data:
+                if limit["name"] == month:
+                    return limit
+
+            return []
+
+    except Exception as e:
+        print(e, "Error")
 
 def limit_exists(limit_file, month):
     try:
@@ -245,6 +265,7 @@ def limit_exists(limit_file, month):
                     print(
                         f"""
     There's already a budget for this month
+    Month: {limit["name"]}
     Budget: {limit["amount"]}
     Spent this month: {limit["spentSoFar"]}
                 """
@@ -315,32 +336,23 @@ def get_current_limit_data(limit_file_name, month):
 
 def check_budget(limit_file_name):
     def decorator(func):
-        def wrapper(month, amount, *args, **kwargs):
-            limit_data = get_current_limit_data(limit_file_name, month)
+        def wrapper(filename, data, expense):
+            date_obj = datetime.strptime(expense[1], "%Y-%m-%d")
+            month_expense = get_month_name(date_obj.month)
 
-            if limit_data is None:
-                print(f"Budget for month {month} is not set.")
-                return
+            # START LOGIC
 
-            current_spent = limit_data["spentSoFar"]
-            monthly_limit = limit_data["amount"]
+            if limit_exists(limit_file_name, month_expense):
+                limit = get_limit(limit_file_name, month_expense)
 
-            if current_spent + amount > monthly_limit:
-                remaining = monthly_limit - current_spent
-                print(
-                    f"""
-    OVER BUDGET!
-Month limit: {monthly_limit}
-Already spent: {current_spent}
-New expense: {amount}
-Remaining to limit: {remaining}
-                      """
-                )
+            month_budget = limit["amount"]
 
-                return None
+            month_sum = get_summary(month_expense)
 
-            print("Budget verification completed. Registering expense...")
-            return func(month, amount, *args, **kwargs)
+            if month_sum < month_budget:
+                print("LESS")
+                
+
 
         return wrapper
 
@@ -353,7 +365,6 @@ def delete_expense(data, ID):
             data.remove(expense)
     write_data(FILENAME, data)
     print(f"Expense deleted successfully.")
-
 
 @check_budget(LIMITS_FILE)
 def add_data(filename: str, data: list, expense: list):
@@ -368,32 +379,101 @@ def main():
     # --- CREATE PARSER ---
     parser = argparse.ArgumentParser(
         description="Expense tracker CLI application.",
-        epilog="And that's how you'd work with it",
+        epilog="""
+-------- QUICK START EXAMPLES --------
+
+1. Adding a new expense:
+   $ python main.py add --amount 500 --category Food --description Coffee break
+
+2. Setting a monthly budget limit:
+   $ python main.py set-limit --month 11 --amount 30000
+
+3. Viewing the overall summary for the current month:
+   $ python main.py summary --month 10
+
+4. Updating an existing expense (assuming expense ID is 5):
+   $ python main.py update --id 5 --amount 550
+
+---
+For detailed information on the arguments for a specific command, use:
+$ python main.py <command> -h
+(Example: python main.py list -h)
+""",
+        formatter_class=argparse.RawDescriptionHelpFormatter,
     )
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     # --- ADD ---
-    add_parser = subparsers.add_parser("add", help="Add an expense")
-    add_parser.add_argument("-d", "--description", nargs="+", help="Description")
-    add_parser.add_argument("-a", "--amount", type=positive_int, help="Amount")
+    add_parser = subparsers.add_parser(
+        "add",
+        help="Add an expense",
+        description="Command allow you to add new expense",
+        epilog="""
+            Example:
+                main.py add -d New mouse for work -a 1500 -c Utilities
+                main.py add -d Lunch -a 250 -c Food
+                """,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+    add_parser.add_argument(
+        "-d",
+        "--description",
+        nargs="+",
+        required=True,
+        help="Brief description of consumption",
+    )
+    add_parser.add_argument(
+        "-a",
+        "--amount",
+        type=positive_int,
+        required=True,
+        help="Amount of expenses in currency $$$",
+    )
     add_parser.add_argument(
         "-c",
         "--category",
         choices=CATEGORIES,
+        required=True,
         help=("Allowed categories: " + ", ".join(CATEGORIES)),
         metavar="",
     )
 
     # --- UPDATE ---
-    update_parser = subparsers.add_parser("update", help="Update an existing expense")
+    update_parser = subparsers.add_parser(
+        "update",
+        help="Update an existing expense",
+        description="Command allows you to update description or amount of an existing expense by id.",
+        epilog="""
+            Example:
+                main.py update --id 1 --description <new desc>
+                main.py update --id 1 --amount <new integer amount>
+                main.py update --id 125 -d <new desc> -a <new integer amount>
+                """,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
     update_parser.add_argument("--id", type=positive_int, help="Expense ID")
+
     update_parser.add_argument(
         "-d", "--description", nargs="+", help="Update descripion"
     )
     update_parser.add_argument("-a", "--amount", help="Update amount")
 
     # --- LIST ---
-    list_parser = subparsers.add_parser("list", help="List all expenses")
+    list_parser = subparsers.add_parser(
+        "list",
+        help="List all expenses",
+        description="Command allow you to list all expenses or a specific one",
+        epilog="""
+            Example:
+                main.py list
+                main.py list -m 10
+                main.py list --category Housing
+                main.py list --month 10 -c Housing
+                """,
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+    )
+
     list_parser.add_argument(
         "-m",
         "--month",
@@ -528,18 +608,7 @@ def main():
                 "spentSoFar": get_summary(data=data, month=args.month),
             }
 
-            if not limit_exists(LIMITS_FILE, get_month_name(args.month)):
-                add_limit(LIMITS_FILE, new_entry)
-
-
-#            if check_if_limit_exists():# return true or false
-#                print(f"LIMIT ALREADY EXISTS {that.limit}. New limit will set")
-#                set_limit(file, month, limit)
-#                print(f"Limit {args.limit} was set.")
-#            else:
-#                set_limit(file, month, limit)
-#                print(f"Limit {args.limit} was set.")
-
 
 if __name__ == "__main__":
     main()
+    # limit_exists(LIMITS_FILE, get_month_name(11))
