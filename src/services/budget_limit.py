@@ -1,130 +1,71 @@
+import os
 import json
-from ..constants import LIMITS_FILE
+from datetime import datetime
+
 from ..helpers.date_utils import get_month_name
 from ..services.expense_data import get_summary
 
-def get_limit(limit_file, month):
-    try:
-        with open(limit_file, "r") as lmtfile:
-            lmtfile.seek(0)
-            content = lmtfile.read().strip()
 
-            if not content:
-                return []
+def load_limits(limit_filename):
+    data = []
+    if os.path.exists(limit_filename) and os.path.getsize(limit_filename) != 0:
+        try:
+            with open(limit_filename, "r", encoding="utf-8") as lmtfile:
+                data = json.load(lmtfile)
 
-            data = json.load(lmtfile)
+        except json.JSONDecodeError:
+            print(
+                f"Warning: Budget file '{limit_filename} is corrupted.\nReinitializing..."
+            )
+            data = []
+            # Rewrite the file immediately to clear the corruption
+            with open(limit_filename, "w", encoding="utf-8") as lmtfile:
+                json.dump(data, lmtfile)
 
-            for limit in data:
-                if limit["name"] == month:
-                    return limit
+    else:
+        with open(limit_filename, "w", encoding="utf-8") as f:
+            json.dump(data, f)
 
-            return []
+    return data
 
-    except Exception as e:
-        print(e, "Error")
 
-def limit_exists(limit_file, month):
-    try:
-        with open(limit_file, "r") as lmtfile:
-            lmtfile.seek(0)
-            content = lmtfile.read().strip()
+def save_limit(limit_filename, current_limits, new_limit):
+    month_to_find = new_limit["name"]
+    found = False
 
-            # if file is empty return False
-            if not content:
-                return False
+    for item in current_limits:
+        if item["name"] == month_to_find:
+            item.update(new_limit)
+            found = True
+            message = f"Budget for {month_to_find} has been ***updated***."
+            break
 
-            lmtfile.seek(0)
-            data = json.load(lmtfile)
-            for limit in data:
-                if limit.get("name") == month:
-                    print(
-                        f"""
-    There's already a budget for this month
-    Month: {limit["name"]}
-    Budget: {limit["amount"]}
-    Spent this month: {limit["spentSoFar"]}
-                """
-                    )
-                    return True
+    if not found:
+        current_limits.append(new_limit)
+        message = f"Budget for {month_to_find} has been ***added***"
 
-        return False
+    with open(limit_filename, "w", encoding="utf-8") as lmtfile:
+        json.dump(current_limits, lmtfile, indent=4)
 
-    except FileNotFoundError:
-        with open(limit_file, "w", encoding="utf-8") as lmtfile:
-            json.dump([], lmtfile, indent=4)
-            return False
+    print(message)
 
-    except json.JSONDecodeError:
-        print(f"Error: Json file '{limit_file}' is corrupted. Reinitializing.")
-        with open(limit_file, "w", encoding="utf-8") as lmtfile:
-            json.dump([], lmtfile, indent=4)
-        return False
 
-def add_limit(limit_file_name, new_budget):
-    try:
-        with open(limit_file_name, "r", encoding="utf-8") as lmtfile:
-            content = lmtfile.read()
-            if content:
-                json_data = json.loads(content)
-            else:
-                json_data = []
-    except FileNotFoundError:
-        print(f"File {limit_file_name} not found.")
-    except json.JSONDecodeError:
-        print(f"Error decoding JSON in file.")
+def check_limits(limit_data, month, amount):
+    for item in limit_data:
+        if item["name"] == month:
+            month_limit = item["amount"]
+            spent_so_far = item["spentSoFar"]
+            break
 
-    json_data.append(new_budget)
-
-    with open(limit_file_name, "w", encoding="utf-8") as lmtfile:
-        json.dump(json_data, lmtfile, indent=4, ensure_ascii=False)
-
-    print(
-        f"""
-    New budget has been added.
-    Month: {new_budget["name"]}
-    Amount: {new_budget["amount"]}
-    """
-    )
-
-# get_current_limit_data можно удалить, т.к. get_limit делает то же самое
-def get_current_limit_data(limit_file_name, month):
-    try:
-        with open(limit_file_name, "r", encoding="utf-8") as lmtfile:
-            content = lmtfile.read()
-            if content:
-                json_data = json.loads(content)
-            else:
-                return None
-
-    except FileNotFoundError:
-        print(f"No budget has been assigned at this time")
-        return None
-    except json.JSONDecoreError:
-        print(f"Json error happened.")
-        return None
-
-    for limit in json_data:
-        if limit.get("month") == month:
-            return limit
-
-def check_budget(limit_file_name):
-    def decorator(func):
-        def wrapper(filename, data, expense):
-            date_obj = datetime.strptime(expense[1], "%Y-%m-%d")
-            month_expense = get_month_name(date_obj.month)
-
-            # START LOGIC
-
-            if limit_exists(limit_file_name, month_expense):
-                limit = get_limit(limit_file_name, month_expense)
-
-            month_budget = limit["amount"]
-
-            month_sum = get_summary(month_expense)
-
-            if month_sum < month_budget:
-                print("LESS")
-
-        return wrapper
-
-    return decorator
+    if spent_so_far + amount > month_limit:
+        print(
+            f"""
+        Warning! Expense exceeds the monthly budget!
+        Month: {month}
+        Month limit: ${float(month_limit)}
+        Spent so far: ${spent_so_far}
+        New expense: ${float(amount)}
+        ---------------------------------------------
+        Over budget by: ${spent_so_far + amount - month_limit}
+        """
+        )

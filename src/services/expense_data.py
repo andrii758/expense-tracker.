@@ -3,7 +3,7 @@ import sys
 import csv
 from datetime import datetime
 
-from ..constants import FILENAME, FIELDS
+from ..constants import FIELDS
 
 
 def load_data(filename: str):
@@ -20,11 +20,13 @@ def load_data(filename: str):
 
     return data
 
+
 def write_data(filename: str, data: list):
     with open(filename, "w", encoding="utf-8") as csvfile:
         csvwriter = csv.writer(csvfile)
         csvwriter.writerows(data)
     print("File is rewritten.")
+
 
 def get_id(data):
     # if data is empty. first row are fields.
@@ -53,6 +55,7 @@ def get_id(data):
 
     return result
 
+
 # checks if id exists for delete argument
 def id_exists(data, id_to_delete):
     target = str(id_to_delete).strip()
@@ -60,6 +63,7 @@ def id_exists(data, id_to_delete):
         if row and str(row[0]).strip() == target:
             return True
     return False
+
 
 def get_summary(data, month=None):
     summary = 0

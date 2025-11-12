@@ -2,12 +2,18 @@ import argparse
 from datetime import datetime
 
 from .helpers.validation import positive_int
-from .helpers.date_utils import get_month_name, get_month_boundaries, get_month_number
+from .helpers.date_utils import get_month_name, get_month_boundaries
 
 from .services.expense_data import load_data, get_id, id_exists, get_summary
-from .services.budget_limit import add_limit, limit_exists, get_limit, get_current_limit_data, check_budget
-from .commands import add_data, update_description, update_amount, delete_expense, list_expenses
-from .constants import FILENAME, CATEGORIES
+from .services.budget_limit import load_limits, save_limit, check_limits
+from .commands import (
+    add_data,
+    update_description,
+    update_amount,
+    delete_expense,
+    list_expenses,
+)
+from .constants import FILENAME, CATEGORIES, LIMITS_FILE
 
 
 def main():
@@ -18,21 +24,21 @@ def main():
 -------- QUICK START EXAMPLES --------
 
 1. Adding a new expense:
-   $ python main.py add --amount 500 --category Food --description Coffee break
+   $ python3 -m src.main add --amount 500 --category Food --description Coffee break
 
 2. Setting a monthly budget limit:
-   $ python main.py set-limit --month 11 --amount 30000
+   $ python3 -m src.main set-limit --month 11 --amount 30000
 
 3. Viewing the overall summary for the current month:
-   $ python main.py summary --month 10
+   $ python3 -m src.main summary --month 10
 
 4. Updating an existing expense (assuming expense ID is 5):
-   $ python main.py update --id 5 --amount 550
+   $ python3 -m src.main update --id 5 --amount 550
 
 ---
 For detailed information on the arguments for a specific command, use:
-$ python main.py <command> -h
-(Example: python main.py list -h)
+$ python3 -m src.main <command> -h
+(Example: python3 -m src.main list -h)
 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -45,8 +51,8 @@ $ python main.py <command> -h
         description="Command allow you to add new expense",
         epilog="""
             Example:
-                main.py add -d New mouse for work -a 1500 -c Utilities
-                main.py add -d Lunch -a 250 -c Food
+                python3 -m src.main add -d New mouse for work -a 1500 -c Utilities
+                python3 -m src.main add -d Lunch -a 250 -c Food
                 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -80,9 +86,9 @@ $ python main.py <command> -h
         description="Command allows you to update description or amount of an existing expense by id.",
         epilog="""
             Example:
-                main.py update --id 1 --description <new desc>
-                main.py update --id 1 --amount <new integer amount>
-                main.py update --id 125 -d <new desc> -a <new integer amount>
+                python3 -m src.main update --id 1 --description <new desc>
+                python3 -m src.main update --id 1 --amount <new integer amount>
+                python3 -m src.main update --id 125 -d <new desc> -a <new integer amount>
                 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -98,13 +104,13 @@ $ python main.py <command> -h
     list_parser = subparsers.add_parser(
         "list",
         help="List all expenses",
-        description="Command allow you to list all expenses or a specific one",
+        description="Command allows you to list all expenses or a specific one",
         epilog="""
             Example:
-                main.py list
-                main.py list -m 10
-                main.py list --category Housing
-                main.py list --month 10 -c Housing
+                python3 -m src.main list
+                python3 -m src.main list -m 10
+                python3 -m src.main list --category Housing
+                python3 -m src.main list --month 10 -c Housing
                 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -133,9 +139,9 @@ $ python main.py <command> -h
         description="Command allows you to summarize all expenses or for a specific month",
         epilog="""
             Example:
-                main.py summary
-                main.py summary -m 10
-                main.py summary --month 10
+                python3 -m src.main summary
+                python3 -m src.main summary -m 10
+                python3 -m src.main summary --month 10
                    """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -155,7 +161,7 @@ $ python main.py <command> -h
         description="Command allows you to delete an expense by id",
         epilog="""
             Example:
-                main.py delete --id 1
+                python3 -m src.main delete --id 1
                 """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -169,8 +175,8 @@ $ python main.py <command> -h
         description="Command allows you to set a budget limit for one month.",
         epilog="""
         Examples:
-            main.py set-limit -m 3 -l 15000
-            main.py set-limit --month 7 --limit 120
+            python3 -m src.main set-limit -m 3 -l 15000
+            python3 -m src.main set-limit --month 7 --limit 120
             """,
         formatter_class=argparse.RawDescriptionHelpFormatter,
     )
@@ -193,20 +199,19 @@ $ python main.py <command> -h
 
     # --- LOAD DATA ---
     data = load_data(FILENAME)
+    limit_data = load_limits(LIMITS_FILE)
 
     match args.command:
         case "add":
-            add_data(
-                FILENAME,
-                data,
-                [
-                    get_id(data),
-                    datetime.now().strftime("%Y-%m-%d"),
-                    " ".join(args.description),
-                    args.amount,
-                    args.category,
-                ],
-            )
+            expense = [
+                get_id(data),
+                datetime.now().strftime("%Y-%m-%d"),
+                " ".join(args.description),
+                args.amount,
+                args.category,
+            ]
+            add_data(FILENAME, data, expense)
+            check_limits(limit_data, get_month_name(expense[1][5:7]), expense[3])
 
         case "update":
             if id_exists(data, args.id):
@@ -244,8 +249,9 @@ $ python main.py <command> -h
                 "periodEnd": end,
                 "spentSoFar": get_summary(data=data, month=args.month),
             }
+            save_limit(LIMITS_FILE, limit_data, new_entry)
 
 
 if __name__ == "__main__":
     main()
-    # limit_exists(LIMITS_FILE, get_month_name(11))
+
